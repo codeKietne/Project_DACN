@@ -1,0 +1,89 @@
+#include <Arduino.h>
+
+// Biến toàn cục
+volatile unsigned int x1 = 0, x2 = 0, n1 = 0, n2 = 0; // Lưu giá trị capture và số lần tràn
+volatile bool capture_flag = false;                  // Cờ báo hiệu có dữ liệu mới
+
+// Biến cho chương trình chính
+float f = 0.0;        // Tần số
+float S = 0.0;        // Tốc độ (RPM)
+int P = 3;            // Số cặp cực
+long F = 16000000;    // Tần số clock hệ thống
+int prescaler = 64;   // Hệ số chia clock
+const unsigned int MAX_TIMER_COUNT = 65535;
+
+// Ngắt tràn Timer1
+ISR(TIMER1_OVF_vect)
+{
+    // Cập nhật biến đếm số lần tràn
+    if (capture_flag) 
+    {
+        n2++;
+    } else 
+    {
+        n1++;
+    }
+}
+
+// Ngắt Input Capture
+ISR(TIMER1_CAPT_vect)
+{
+    unsigned int captured_value = ICR1; // Đọc giá trị capture
+
+    if (!capture_flag) {
+        x1 = captured_value; // Lưu giá trị capture đầu tiên
+        n1 = 0;              // Reset số lần tràn tại cạnh đầu tiên
+        capture_flag = true;
+    } else {
+        x2 = captured_value; // Lưu giá trị capture thứ hai
+        n2 = 0;              // Reset số lần tràn tại cạnh thứ hai
+        capture_flag = false;
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+
+    // Cấu hình Timer1
+    TCCR1A = 0;
+    TCCR1B = (0 << ICES1) | (1 << CS11) | (1 << CS10); // Cạnh xuống, prescaler = 64
+    TIMSK1 = (1 << TOIE1) | (1 << ICIE1);              // Bật ngắt tràn và input capture
+
+    sei(); // Bật ngắt toàn cục
+}
+
+void loop()
+{
+    static unsigned int t1, t2, overflows;
+    static bool valid_data = false;
+
+    if (!capture_flag) {
+        noInterrupts(); // Tạm dừng ngắt để đọc dữ liệu an toàn
+        t1 = x1;
+        t2 = x2;
+        overflows = n1 + n2; // Tổng số lần tràn giữa hai cạnh
+        valid_data = true;
+        interrupts(); // Cho phép ngắt trở lại
+    }
+
+    if (valid_data) 
+    {
+        valid_data = false; // Reset cờ dữ liệu hợp lệ
+
+        // Tính toán khoảng thời gian giữa hai cạnh
+        unsigned long deltaTCNT1 = (overflows * MAX_TIMER_COUNT) + t2 - t1;
+
+        // Tính tần số và tốc độ
+        f = F / (prescaler * deltaTCNT1);
+        S = (60 * f) / P;
+
+        // In kết quả
+        Serial.print("Frequency: ");
+        Serial.print(f, 2);
+        Serial.print(" Hz, ");
+        Serial.print("Speed: ");
+        Serial.print(S, 2);
+        Serial.println(" RPM");
+    }
+}

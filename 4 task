@@ -1,0 +1,83 @@
+#include <Arduino.h>
+
+
+int P = 6;                
+const long F = 16000000;  
+int prescaler = 64;
+
+volatile unsigned long n = 0;  
+volatile unsigned int x1 = 0, x2 = 0;  
+volatile bool edge_detected = false;  
+volatile bool calc_flag = false;      
+volatile bool display_flag = false;  
+volatile unsigned int overflow_counter = 0;  
+
+float S = 0;  
+float f = 0;  
+volatile unsigned long deltaTCNT1 = 0;
+
+ISR(TIMER1_OVF_vect)
+{
+  n++;  // Đếm số lần tràn
+
+  // Đếm số lần tràn cho hiển thị
+  overflow_counter++;
+  if (overflow_counter >= 4)  // 4 lần tràn = 1 giây
+  {
+    overflow_counter = 0;  // Reset bộ đếm
+    display_flag = true;   // Báo hiệu sẵn sàng hiển thị
+  }
+}
+
+ISR(TIMER1_CAPT_vect)
+{
+  static unsigned long last_n = 0;
+  unsigned int temp = ICR1;
+
+  if (!edge_detected)
+  {
+    x1 = temp;
+    last_n = n;  // Lưu số lần tràn
+    edge_detected = true;
+  }
+  else
+  {
+    x2 = temp;
+    deltaTCNT1 = (n - last_n) * 65536UL + x2 - x1;  // Tính số đếm thực tế
+    edge_detected = false;
+    calc_flag = true;  // Báo hiệu dữ liệu sẵn sàng để tính
+  }
+}
+
+void setup()
+{
+  Serial.begin(4800);
+  TCCR1A = 0;
+  TCCR1B = (0 << ICES1) | (1 << CS11) | (1 << CS10); 
+  TIMSK1 = (1 << TOIE1) | (1 << ICIE1);  
+
+  sei();  
+}
+
+void loop()
+{
+  // Task 3: Tính toán tốc độ
+  if (calc_flag && deltaTCNT1 > 0)
+  {
+    f = (float)F / (prescaler * deltaTCNT1); 
+    S = (60.0 * f) / P;  // Tính tốc độ RPM
+    calc_flag = false;  // Reset cờ
+  }
+
+  // Task 4: Hiển thị tốc độ
+  if (display_flag)
+  {
+    display_flag = false;  // Reset cờ hiển thị
+    Serial.print("Frequency: ");
+    Serial.print(f, 2);  // In tần số với 2 chữ số thập phân
+    Serial.print(" Hz, ");
+    Serial.print("Speed: ");
+    Serial.print(S, 2);  // In tốc độ (RPM) với 2 chữ số thập phân
+    Serial.println(" RPM");
+  }
+}
